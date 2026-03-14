@@ -76,8 +76,10 @@ function bindMenuEvents() {
 
       STATE.peer.on('connection', conn => {
         STATE.conn = conn;
-        setupConnection();
-        startGameHost();
+        STATE.conn.on('open', () => {
+          setupConnection();
+          startGameHost();
+        });
       });
 
       STATE.peer.on('error', err => {
