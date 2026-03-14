@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Catan Serverless P2P</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Overlay for Menus -->
+    <div id="menu-overlay" class="glass-panel active">
+        <h1>Catan<br><span class="subtitle">Serverless P2P</span></h1>
+        
+        <div id="main-menu" class="menu-section active">
+            <button id="btn-host" class="primary-btn">Host New Game</button>
+            <div class="divider">OR</div>
+            <input type="text" id="input-join-id" placeholder="Enter Host ID" />
+            <button id="btn-join" class="secondary-btn">Join Game</button>
+        </div>
+
+        <div id="hosting-menu" class="menu-section">
+            <h2>Waiting for Player...</h2>
+            <p>Share this ID with your friend:</p>
+            <div class="id-display" id="display-host-id">Loading...</div>
+            <button id="btn-cancel-host" class="ghost-btn">Cancel</button>
+        </div>
+        
+        <div id="connecting-menu" class="menu-section">
+            <h2>Connecting...</h2>
+            <div class="loader"></div>
+        </div>
+        
+        <div id="game-over-menu" class="menu-section">
+            <h2 id="winner-text">You Win!</h2>
+            <button id="btn-rematch" class="primary-btn">Play Again</button>
+        </div>
+    </div>
+
+    <!-- Main Game UI (Hidden initially) -->
+    <div id="game-container" class="hidden">
+      
+      <!-- Top Bar: Turn Info & Dice -->
+      <header class="game-header glass-panel">
+        <div class="turn-indicator">
+          <span id="turn-text">Player 1's Turn</span>
+        </div>
+        <div class="dice-container" id="dice-container">
+          <button id="btn-roll" class="primary-btn">Roll Dice</button>
+          <div id="dice-result" class="hidden">
+            <span id="dice-1">⚀</span>
+            <span id="dice-2">⚀</span>
+          </div>
+        </div>
+        <div class="game-log" id="game-log">Game Started!</div>
+      </header>
+
+      <!-- Main Play Area -->
+      <main class="play-area">
+        
+        <!-- Player 1 Dashboard (Left) -->
+        <aside class="dashboard player-1 glass-panel" id="dash-p1">
+          <h3>Player 1 <span class="badge host-badge">You</span></h3>
+          <div class="vp-box"><span id="p1-vp">0</span> VP</div>
+          <div class="resources">
+            <div class="res" data-type="wood"><span class="icon">🌲</span> <span id="p1-wood">0</span></div>
+            <div class="res" data-type="brick"><span class="icon">🧱</span> <span id="p1-brick">0</span></div>
+            <div class="res" data-type="sheep"><span class="icon">🐑</span> <span id="p1-sheep">0</span></div>
+            <div class="res" data-type="wheat"><span class="icon">🌾</span> <span id="p1-wheat">0</span></div>
+            <div class="res" data-type="ore"><span class="icon">🪨</span> <span id="p1-ore">0</span></div>
+          </div>
+        </aside>
+
+        <!-- Board Area (Center) -->
+        <div class="board-container" id="board-container">
+            <svg id="board-svg" viewBox="-400 -400 800 800" xmlns="http://www.w3.org/2000/svg">
+                <!-- Hexes, Edges, and Intersections populated by JS -->
+                <g id="layer-hexes"></g>
+                <g id="layer-edges"></g>
+                <g id="layer-nodes"></g>
+            </svg>
+        </div>
+
+        <!-- Player 2 Dashboard (Right) -->
+        <aside class="dashboard player-2 glass-panel" id="dash-p2">
+          <h3>Player 2 <span class="badge diff-badge">Opponent</span></h3>
+          <div class="vp-box"><span id="p2-vp">0</span> VP</div>
+          <div class="resources">
+            <div class="res" data-type="wood"><span class="icon">🌲</span> <span id="p2-wood">0</span></div>
+            <div class="res" data-type="brick"><span class="icon">🧱</span> <span id="p2-brick">0</span></div>
+            <div class="res" data-type="sheep"><span class="icon">🐑</span> <span id="p2-sheep">0</span></div>
+            <div class="res" data-type="wheat"><span class="icon">🌾</span> <span id="p2-wheat">0</span></div>
+            <div class="res" data-type="ore"><span class="icon">🪨</span> <span id="p2-ore">0</span></div>
+          </div>
+        </aside>
+      </main>
+
+      <!-- Bottom Action Bar -->
+      <footer class="action-bar glass-panel">
+        <button id="btn-build-road" class="action-btn tooltip" disabled>
+          🛤️ Build Road
+          <span class="tooltiptext">Cost: 1 Wood, 1 Brick</span>
+        </button>
+        <button id="btn-build-settlement" class="action-btn tooltip" disabled>
+          🏠 Build Settlement
+          <span class="tooltiptext">Cost: 1 Wood, 1 Brick, 1 Wheat, 1 Sheep</span>
+        </button>
+        <button id="btn-build-city" class="action-btn tooltip" disabled>
+          🏙️ Upgrade City
+          <span class="tooltiptext">Cost: 2 Wheat, 3 Ore</span>
+        </button>
+        <button id="btn-end-turn" class="action-btn danger-btn" disabled>End Turn</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Load PeerJS from CDN -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
