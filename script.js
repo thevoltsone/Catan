@@ -32,14 +32,14 @@ const UI = {
   connectingMenu: document.getElementById('connecting-menu'),
   gameOverMenu: document.getElementById('game-over-menu'),
   appContainer: document.getElementById('game-container'),
-  
+
   hostIdDisplay: document.getElementById('display-host-id'),
   inputJoinId: document.getElementById('input-join-id'),
-  
+
   btnHost: document.getElementById('btn-host'),
   btnJoin: document.getElementById('btn-join'),
   btnCancelHost: document.getElementById('btn-cancel-host'),
-  
+
   log: document.getElementById('game-log'),
   turnText: document.getElementById('turn-text')
 };
@@ -101,15 +101,15 @@ function bindMenuEvents() {
   UI.btnJoin.onclick = () => {
     const hostId = UI.inputJoinId.value.trim();
     if (!hostId) return alert("Enter a valid Host ID");
-    
+
     showMenu('connecting-menu');
     STATE.peer = new Peer({ debug: 2 });
-    
+
     STATE.peer.on('open', id => {
       STATE.isHost = false;
       STATE.myPlayerId = 'p2';
       STATE.conn = STATE.peer.connect(hostId);
-      
+
       STATE.conn.on('open', () => {
         setupConnection();
         logMsg("Connected to Host. Waiting for board...");
@@ -148,18 +148,18 @@ function handleNetworkMessage(msg) {
   if (msg.type === 'SYNC_STATE') {
     STATE.gameState = msg.state;
     updateUIFromState();
-    
+
     if (UI.menuOverlay.classList.contains('active')) {
       UI.menuOverlay.classList.remove('active');
       UI.appContainer.classList.remove('hidden');
       logMsg("Game Started!");
     }
   }
-  
+
   if (msg.type === 'ACTION_INTENT' && STATE.isHost) {
     processIntent(msg.player, msg.action, msg.data);
   }
-  
+
   if (msg.type === 'LOG') {
     logMsg(msg.message);
   }
@@ -168,7 +168,7 @@ function handleNetworkMessage(msg) {
 // --- HOST LOGIC: PROCESS INTENTS ---
 function processIntent(player, action, data) {
   if (STATE.gameState.activePlayer !== player) return; // Not their turn
-  
+
   let valid = false;
   let msg = '';
 
@@ -178,16 +178,16 @@ function processIntent(player, action, data) {
     const d2 = Math.floor(Math.random() * 6) + 1;
     const roll = d1 + d2;
     msg = `${player} rolled a ${roll}!`;
-    
+
     if (roll === 7) {
       msg += " (Robber not implemented in MVP)";
     } else {
       generateResources(roll);
     }
-    
+
     STATE.gameState.phase = 'building';
     valid = true;
-    
+
     // Broadcast roll result
     broadcastLog(msg);
     showDice(d1, d2);
@@ -201,14 +201,88 @@ function processIntent(player, action, data) {
     broadcastLog(`${player} ended their turn.`);
   }
   else if (action === 'BUILD') {
-    if (STATE.gameState.phase !== 'building') return;
-    valid = attemptBuild(player, data.type, data.id);
+    // Check if we are in the initial setup phase
+    if (STATE.gameState.phase.startsWith('setup')) {
+      valid = attemptSetupBuild(player, data.type, data.id);
+    } else if (STATE.gameState.phase === 'building') {
+      valid = attemptBuild(player, data.type, data.id);
+    }
   }
 
   if (valid) {
     checkWinCondition();
     sendNetworkMessage({ type: 'SYNC_STATE', state: STATE.gameState });
   }
+}
+
+function attemptSetupBuild(player, type, id) {
+  const pState = STATE.gameState.players[player];
+  const { board, phase } = STATE.gameState;
+  const isSetup1 = phase === 'setup1';
+  const isSetup2 = phase === 'setup2';
+
+  // During setup, you must build exactly 1 settlement and 1 road per phase.
+  // We'll track this by allowing a settlement first, then a road.
+  // To keep MVP simple: if type is settlement and they haven't built one this turn, allow it.
+
+  if (type === 'settlement') {
+    const node = board.nodes[id];
+    if (node.owner) return false;
+
+    // In actual Catan, adjacency rules apply. We skip for MVP brevity.
+    node.owner = player;
+    node.type = 'settlement';
+    pState.vp += 1;
+
+    // If it's the second setup phase, they get starting resources for this settlement
+    if (isSetup2) {
+      node.hexes.forEach(hId => {
+        const h = board.hexes.find(hx => hx.id === hId);
+        if (h && h.res !== 'desert') {
+          pState.res[h.res] += 1;
+        }
+      });
+    }
+
+    broadcastLog(`${player} placed a starting Settlement.`);
+
+    // Force them to build a road next. We can just append suffix to phase or rely on UI
+    STATE.gameState.phase = phase + '_road';
+    return true;
+  }
+  else if (type === 'road') {
+    if (!phase.endsWith('_road')) return false; // Must build settlement first
+
+    const edge = board.edges[id];
+    if (edge.owner) return false;
+
+    edge.owner = player;
+    broadcastLog(`${player} placed a starting Road.`);
+
+    // Advance setup turns
+    if (phase === 'setup1_road') {
+      if (player === 'p1') {
+        STATE.gameState.activePlayer = 'p2';
+        STATE.gameState.phase = 'setup1';
+      } else {
+        // p2 just finished setup1, so p2 immediately starts setup2
+        STATE.gameState.activePlayer = 'p2';
+        STATE.gameState.phase = 'setup2';
+      }
+    } else if (phase === 'setup2_road') {
+      if (player === 'p2') {
+        STATE.gameState.activePlayer = 'p1';
+        STATE.gameState.phase = 'setup2';
+      } else {
+        // Setup complete! Start normal game
+        STATE.gameState.activePlayer = 'p1';
+        STATE.gameState.phase = 'rolling';
+        broadcastLog("Initial placement complete. Game start!");
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
 function generateResources(roll) {
@@ -230,12 +304,12 @@ function generateResources(roll) {
 function attemptBuild(player, type, id) {
   const pState = STATE.gameState.players[player];
   const { board } = STATE.gameState;
-  
+
   if (type === 'road') {
     if (pState.res.wood < 1 || pState.res.brick < 1) return false;
     const edge = board.edges[id];
     if (edge.owner) return false; // already built
-    
+
     // Enforce connected to existing road/settlement (simplified for MVP: just needs to be next to *any* owned node)
     // Actually, skipping complex adjacency checks for MVP simplicity, just taking resources.
     pState.res.wood--; pState.res.brick--;
@@ -247,7 +321,7 @@ function attemptBuild(player, type, id) {
     if (pState.res.wood < 1 || pState.res.brick < 1 || pState.res.wheat < 1 || pState.res.sheep < 1) return false;
     const node = board.nodes[id];
     if (node.owner) return false;
-    
+
     pState.res.wood--; pState.res.brick--; pState.res.wheat--; pState.res.sheep--;
     node.owner = player;
     node.type = 'settlement';
@@ -259,7 +333,7 @@ function attemptBuild(player, type, id) {
     if (pState.res.wheat < 2 || pState.res.ore < 3) return false;
     const node = board.nodes[id];
     if (node.owner !== player || node.type !== 'settlement') return false;
-    
+
     pState.res.wheat -= 2; pState.res.ore -= 3;
     node.type = 'city';
     pState.vp += 1; // +1 since settlement was already +1 = total 2
@@ -317,7 +391,7 @@ function toggleBuildMode(mode) {
 
 function handleBoardClick(type, id) {
   if (!buildMode) return;
-  
+
   if (buildMode === 'road' && type === 'edge') {
     sendIntent('BUILD', { type: 'road', id });
     toggleBuildMode(buildMode); // reset toggle
@@ -332,7 +406,7 @@ function sendIntent(action, data = null) {
     logMsg("Not your turn!");
     return;
   }
-  
+
   if (STATE.isHost) {
     processIntent(STATE.myPlayerId, action, data);
   } else {
@@ -343,7 +417,7 @@ function sendIntent(action, data = null) {
 function showDice(d1, d2) {
   const dc = document.getElementById('dice-result');
   dc.classList.remove('hidden');
-  const dmap = ['','⚀','⚁','⚂','⚃','⚄','⚅'];
+  const dmap = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
   document.getElementById('dice-1').textContent = dmap[d1];
   document.getElementById('dice-2').textContent = dmap[d2];
 }
@@ -353,7 +427,7 @@ function startGameHost() {
   STATE.gameState = {
     turn: 1,
     activePlayer: 'p1',
-    phase: 'rolling',
+    phase: 'setup1', // Changed from rolling to setup1
     players: {
       p1: { vp: 0, res: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 } },
       p2: { vp: 0, res: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 } }
@@ -361,7 +435,7 @@ function startGameHost() {
     board: { hexes: [], nodes: {}, edges: {} }
   };
   generateBoard();
-  
+
   sendNetworkMessage({ type: 'SYNC_STATE', state: STATE.gameState });
   UI.menuOverlay.classList.remove('active');
   UI.appContainer.classList.remove('hidden');
@@ -372,12 +446,12 @@ function generateBoard() {
   const size = 60; // hex radius
   const w = Math.sqrt(3) * size;
   const h = 2 * size;
-  
+
   // Layout defines row length
   const layout = [3, 4, 5, 4, 3];
-  let resList = ['wood','wood','wood','wood', 'sheep','sheep','sheep','sheep', 'wheat','wheat','wheat','wheat', 'brick','brick','brick', 'ore','ore','ore', 'desert'];
+  let resList = ['wood', 'wood', 'wood', 'wood', 'sheep', 'sheep', 'sheep', 'sheep', 'wheat', 'wheat', 'wheat', 'wheat', 'brick', 'brick', 'brick', 'ore', 'ore', 'ore', 'desert'];
   let numList = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12];
-  
+
   // Basic shuffle
   resList.sort(() => Math.random() - 0.5);
   numList.sort(() => Math.random() - 0.5);
@@ -389,30 +463,32 @@ function generateBoard() {
     const xOffset = -(cols - 1) * w / 2;
     for (let c = 0; c < cols; c++) {
       const x = xOffset + c * w;
-      
+
       const res = resList.pop();
       const num = res === 'desert' ? null : numList.pop();
-      
+
       const hex = { id: hexId++, x, y, res, num, vertices: [] };
-      
+
       // Calculate vertices (Pointy top)
       for (let i = 0; i < 6; i++) {
         const angle = Math.PI / 180 * (60 * i - 30);
         const vx = Math.round(x + size * Math.cos(angle));
         const vy = Math.round(y + size * Math.sin(angle));
         const vId = `${vx},${vy}`;
-        
+
         hex.vertices.push(vId);
-        
+
         // Register Node
         if (!STATE.gameState.board.nodes[vId]) {
           STATE.gameState.board.nodes[vId] = { id: vId, x: vx, y: vy, owner: null, type: null, hexes: [] };
         }
-        STATE.gameState.board.nodes[vId].hexes.push(hex.id);
-        
+        if (!STATE.gameState.board.nodes[vId].hexes.includes(hex.id)) {
+          STATE.gameState.board.nodes[vId].hexes.push(hex.id);
+        }
+
         // Register Edge (connecting current to previous vertex)
         if (i > 0) {
-          const prevId = hex.vertices[i-1];
+          const prevId = hex.vertices[i - 1];
           const edgeId = [vId, prevId].sort().join('_');
           if (!STATE.gameState.board.edges[edgeId]) {
             STATE.gameState.board.edges[edgeId] = { id: edgeId, v1: prevId, v2: vId, owner: null };
@@ -424,7 +500,7 @@ function generateBoard() {
       if (!STATE.gameState.board.edges[lastEdgeId]) {
         STATE.gameState.board.edges[lastEdgeId] = { id: lastEdgeId, v1: hex.vertices[5], v2: hex.vertices[0], owner: null };
       }
-      
+
       STATE.gameState.board.hexes.push(hex);
     }
   }
@@ -433,14 +509,21 @@ function generateBoard() {
 // --- RENDERING / UI SYNC ---
 function updateUIFromState() {
   const isMyTurn = STATE.gameState.activePlayer === STATE.myPlayerId;
+  const phase = STATE.gameState.phase;
+
   if (isMyTurn) {
-    UI.turnText.textContent = "Your Turn (" + (STATE.gameState.phase === 'rolling' ? 'Roll Dice' : 'Build Phase') + ")";
+    if (phase.startsWith('setup')) {
+      const isRoad = phase.endsWith('_road');
+      UI.turnText.textContent = `Setup Phase: Place a free ${isRoad ? 'Road' : 'Settlement'}`;
+    } else {
+      UI.turnText.textContent = "Your Turn (" + (phase === 'rolling' ? 'Roll Dice' : 'Build Phase') + ")";
+    }
     UI.turnText.style.color = 'white';
   } else {
     UI.turnText.textContent = "Opponent's Turn";
     UI.turnText.style.color = '#888';
   }
-  
+
   ['p1', 'p2'].forEach(p => {
     document.getElementById(`${p}-vp`).textContent = STATE.gameState.players[p].vp;
     Object.keys(STATE.gameState.players[p].res).forEach(res => {
@@ -448,14 +531,24 @@ function updateUIFromState() {
     });
   });
 
-  document.getElementById('btn-roll').style.display = (isMyTurn && STATE.gameState.phase === 'rolling') ? 'block' : 'none';
-  
-  const canBuild = isMyTurn && STATE.gameState.phase === 'building';
-  document.getElementById('btn-build-road').disabled = !canBuild;
-  document.getElementById('btn-build-settlement').disabled = !canBuild;
-  document.getElementById('btn-build-city').disabled = !canBuild;
-  document.getElementById('btn-end-turn').disabled = !canBuild;
-  
+  document.getElementById('btn-roll').style.display = (isMyTurn && phase === 'rolling') ? 'block' : 'none';
+
+  const canBuild = isMyTurn && phase === 'building';
+  const inSetup = isMyTurn && phase.startsWith('setup');
+
+  if (inSetup) {
+    const isRoadSetup = phase.endsWith('_road');
+    document.getElementById('btn-build-road').disabled = !isRoadSetup;
+    document.getElementById('btn-build-settlement').disabled = isRoadSetup;
+    document.getElementById('btn-build-city').disabled = true;
+    document.getElementById('btn-end-turn').disabled = true;
+  } else {
+    document.getElementById('btn-build-road').disabled = !canBuild;
+    document.getElementById('btn-build-settlement').disabled = !canBuild;
+    document.getElementById('btn-build-city').disabled = !canBuild;
+    document.getElementById('btn-end-turn').disabled = !canBuild;
+  }
+
   renderBoard();
 }
 
@@ -463,7 +556,7 @@ function renderBoard() {
   const gHexes = document.getElementById('layer-hexes');
   const gEdges = document.getElementById('layer-edges');
   const gNodes = document.getElementById('layer-nodes');
-  
+
   gHexes.innerHTML = '';
   gEdges.innerHTML = '';
   gNodes.innerHTML = '';
@@ -473,7 +566,7 @@ function renderBoard() {
   // Render Hexes
   board.hexes.forEach(hex => {
     const pts = hex.vertices.map(v => v.replace(',', ',')).join(' '); // x,y list
-    
+
     const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
     poly.setAttribute("points", pts);
     poly.classList.add('hex-path', 'hex', hex.res);
@@ -498,13 +591,13 @@ function renderBoard() {
   Object.values(board.edges).forEach(edge => {
     const [x1, y1] = edge.v1.split(',');
     const [x2, y2] = edge.v2.split(',');
-    
+
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
     line.setAttribute("x1", x1); line.setAttribute("y1", y1);
     line.setAttribute("x2", x2); line.setAttribute("y2", y2);
     line.classList.add('edge');
     if (edge.owner) line.classList.add('built', edge.owner);
-    
+
     line.onclick = () => handleBoardClick('edge', edge.id);
     gEdges.appendChild(line);
   });
@@ -518,15 +611,10 @@ function renderBoard() {
       circle.classList.add('built', node.owner);
       if (node.type === 'city') circle.classList.add('city');
     }
-    
+
     circle.onclick = () => handleBoardClick('node', node.id);
     gNodes.appendChild(circle);
   });
-}
-
-function handleBoardClick(type, id) {
-  // Client interaction for building
-  // To be implemented
 }
 
 init();
