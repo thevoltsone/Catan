@@ -163,6 +163,10 @@ function handleNetworkMessage(msg) {
   if (msg.type === 'LOG') {
     logMsg(msg.message);
   }
+
+  if (msg.type === 'DICE_RESULT') {
+    showDice(msg.d1, msg.d2);
+  }
 }
 
 // --- HOST LOGIC: PROCESS INTENTS ---
@@ -191,6 +195,7 @@ function processIntent(player, action, data) {
     // Broadcast roll result
     broadcastLog(msg);
     showDice(d1, d2);
+    sendNetworkMessage({ type: 'DICE_RESULT', d1, d2 });
   }
   else if (action === 'END_TURN') {
     if (STATE.gameState.phase !== 'building') return;
@@ -211,6 +216,7 @@ function processIntent(player, action, data) {
 
   if (valid) {
     checkWinCondition();
+    updateUIFromState();
     sendNetworkMessage({ type: 'SYNC_STATE', state: STATE.gameState });
   }
 }
